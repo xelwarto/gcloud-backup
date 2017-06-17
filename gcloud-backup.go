@@ -36,6 +36,7 @@ type Flags struct {
   Help bool
 	Import bool
 	Export bool
+	Readable bool
   Service string
   Account string
 	Project string
@@ -63,6 +64,7 @@ type jsonData struct {
 var flags = new(Flags)
 var config = new(Config)
 var services = new(Services)
+var output []byte
 
 func init() {
 	config.Action.Import = false
@@ -75,6 +77,7 @@ func init() {
   flag.BoolVar(&flags.Help, "help", false, "Display this help")
 	flag.BoolVar(&flags.Export, "export", false, "Create new services export")
 	flag.BoolVar(&flags.Import, "import", false, "Start services import from backup")
+	flag.BoolVar(&flags.Readable, "readable", false, "Output JSON in readable format")
   flag.StringVar(&flags.Service, "service", "", "List of services to export/import (comma seperated)")
   flag.StringVar(&flags.Account, "account", "", "Google SDK account username")
 	flag.StringVar(&flags.Project, "project", "", "Google SDK proect name")
@@ -172,13 +175,21 @@ func main() {
 				log.Printf("Error: invalid service - %v", svc)
 			}
 		}
-		//output, err := json.Marshal(export)
-		output, err := json.MarshalIndent(export, "", "  ")
-		if err != nil {
-			log.Fatal(err)
+
+		if flags.Readable {
+			b, err := json.MarshalIndent(export, "", "  ")
+			if err != nil {
+				log.Fatal(err)
+			}
+			output = b
+		} else {
+			b, err := json.Marshal(export)
+			if err != nil {
+				log.Fatal(err)
+			}
+			output = b
 		}
 		os.Stdout.Write(output)
-
 	} else if config.Action.Import {
 		log.Printf("Starting import process of %v", config.Service)
 	}
