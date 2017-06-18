@@ -40,6 +40,7 @@ type Flags struct {
   Service string
   Account string
 	Project string
+	Region string
 }
 
 type Config struct {
@@ -50,7 +51,7 @@ type Config struct {
 		Export bool `json:"export,string"`
 	} `json:"action"`
 	Project string `json:"projeoct"`
-	ComputeService *compute.Service `json:"-"`
+	Region string `json:"region"`
 }
 
 type Services struct {
@@ -59,11 +60,15 @@ type Services struct {
 
 type jsonData struct {
 	Firewalls []*compute.Firewall `json:"firewalls,omitempty"`
+	Routes []*compute.Route `json:"routes,omitempty"`
+	Networks []*compute.Network `json:"networks,omitempty"`
+	Addresses map[string][]*compute.Address `json:"addresses,omitempty"`
 }
 
 var flags = new(Flags)
 var config = new(Config)
 var services = new(Services)
+var service *compute.Service
 var output []byte
 
 func init() {
@@ -72,6 +77,9 @@ func init() {
 
 	services.Export = make(map[string]func(*jsonData))
 	services.Export["firewalls"] = exportFirewalls
+	services.Export["routes"] = exportRoutes
+	services.Export["networks"] = exportNetworks
+	services.Export["addresses"] = exportAddresses
 
   flag.BoolVar(&flags.Version, "version", false, "Display version information")
   flag.BoolVar(&flags.Help, "help", false, "Display this help")
@@ -81,6 +89,7 @@ func init() {
   flag.StringVar(&flags.Service, "service", "", "List of services to export/import (comma seperated)")
   flag.StringVar(&flags.Account, "account", "", "Google SDK account username")
 	flag.StringVar(&flags.Project, "project", "", "Google SDK proect name")
+	flag.StringVar(&flags.Region, "region", "", "Specify Google compute region")
   flag.Parse()
 
   if flags.Version {
@@ -111,6 +120,10 @@ func init() {
     config.Project = flags.Project
   }
 
+	if flags.Region != "" {
+    config.Region = flags.Region
+  }
+
 	if flags.Import || flags.Export {
 		if flags.Import && flags.Export {
 			showUsage("please select an action - export/import")
@@ -136,7 +149,7 @@ func showUsage(s ...string) {
   os.Exit(1)
 }
 
-func createComputeService() {
+func createServiceFromSDK() {
 	log.Println("Creating new client from Google SDK config")
 	sdk_config, err := google.NewSDKConfig(config.Account)
 	if err != nil {
@@ -144,20 +157,61 @@ func createComputeService() {
 	}
 
 	client := sdk_config.Client(context.Background())
-	config.ComputeService, err = compute.New(client)
+	service, err = compute.New(client)
 	if err != nil {
 		log.Fatal(err)
 	}
 }
 
-func exportFirewalls(exp *jsonData) {
-	if config.ComputeService != nil {
-		fw_svc := compute.NewFirewallsService(config.ComputeService)
-	  fw_list, err := fw_svc.List(config.Project).Do()
+func exportNetworks(exp *jsonData) {
+	if service != nil {
+		svc := service.Networks
+	  list, err := svc.List(config.Project).Do()
 		if err != nil {
 	    log.Fatal(err)
 	  } else {
-			exp.Firewalls = fw_list.Items
+			exp.Networks = list.Items
+		}
+	}
+}
+
+func exportAddresses(exp *jsonData) {
+	if service != nil {
+		exp.Addresses = make(map[string][]*compute.Address)
+		svc := service.Addresses
+	  list, err := svc.AggregatedList(config.Project).Do()
+		if err != nil {
+	    log.Fatal(err)
+	  } else {
+			for key, value := range list.Items {
+				if len(value.Addresses) > 0 {
+					exp.Addresses[key] = value.Addresses
+				}
+			}
+		}
+	}
+}
+
+func exportFirewalls(exp *jsonData) {
+	if service != nil {
+		svc := service.Firewalls
+	  list, err := svc.List(config.Project).Do()
+		if err != nil {
+	    log.Fatal(err)
+	  } else {
+			exp.Firewalls = list.Items
+		}
+	}
+}
+
+func exportRoutes(exp *jsonData) {
+	if service != nil {
+		svc := service.Routes
+	  list, err := svc.List(config.Project).Do()
+		if err != nil {
+	    log.Fatal(err)
+	  } else {
+			exp.Routes = list.Items
 		}
 	}
 }
@@ -167,7 +221,7 @@ func main() {
   if config.Action.Export {
 		log.Printf("Starting export process of %v", config.Service)
 		export := new(jsonData)
-		createComputeService()
+		createServiceFromSDK()
 		for _, svc := range config.Service {
 			if _, ok := services.Export[svc]; ok {
 				services.Export[svc](export)
